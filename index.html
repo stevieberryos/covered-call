@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Covered Call">
+<meta name="theme-color" content="#0f2e1f">
+<link rel="manifest" href="manifest.json">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<title>Simple Covered Call Calculator</title>
+<style>
+:root{--bg:#faf9f6;--card:#fff;--ink:#1a1a19;--mut:#6b6a65;--line:#e4e2db;--ok:#0f7a3d;--okbg:#e6f4ea;--warn:#8a5a00;--warnbg:#fdf3dc}
+@media (prefers-color-scheme:dark){:root{--bg:#141413;--card:#1e1e1c;--ink:#f0efec;--mut:#a3a29b;--line:#33332f;--ok:#5cc98a;--okbg:#16301f;--warn:#f0c060;--warnbg:#3a2f14}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}
+main{max-width:520px;margin:0 auto;padding:16px;padding-top:calc(16px + env(safe-area-inset-top));padding-bottom:calc(16px + env(safe-area-inset-bottom))}
+h1{font-size:22px;font-weight:600;margin:4px 0 14px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:14px;margin-bottom:14px}
+.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+label{display:block;font-size:12px;color:var(--mut)}
+input[type=number],input[type=text]{width:100%;margin-top:3px;padding:9px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font-size:16px}
+.chk{display:flex;gap:8px;align-items:center;font-size:15px;color:var(--ink);margin-top:12px}
+.chk input{width:20px;height:20px}
+.ans{border-radius:12px;padding:16px;margin-bottom:14px}
+.ans .h{font-size:13px;font-weight:600;letter-spacing:.02em}
+.ans .b{font-size:26px;font-weight:700;margin:4px 0}
+.ans .s{font-size:14px}
+table{width:100%;border-collapse:collapse;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{padding:8px 4px;text-align:right;border-bottom:1px solid var(--line)}
+th{color:var(--mut);font-weight:500;font-size:12px}
+th:first-child,td:first-child{text-align:left}
+tr.pick td{font-weight:700;color:var(--ok)}
+.note{font-size:12px;color:var(--mut);margin:8px 0 0}
+.err{color:#c03030;font-size:13px}
+</style>
+</head>
+<body>
+<main>
+<h1>Covered call: what &amp; when</h1>
+
+<div class="card">
+<div class="grid">
+<label>Ticker<input type="text" id="tk" value="SOXL" style="text-transform:uppercase"></label>
+<label>Your cost / share<input type="number" id="cost" value="87" step="0.01"></label>
+<label>Price now<input type="number" id="px" value="45" step="0.01"></label>
+<label>IV % (from chain)<input type="number" id="iv" value="150" step="5"></label>
+<label>Days to expiry<input type="number" id="dte" value="30" step="1"></label>
+<label>Min premium / month %<input type="number" id="minY" value="2" step="0.5"></label>
+</div>
+<label class="chk"><input type="checkbox" id="green"> Green day today</label>
+<div class="err" id="err"></div>
+</div>
+
+<div class="ans" id="ans"></div>
+
+<div class="card">
+<table id="tbl"></table>
+<p class="note">Rule: strike + premium must be at least your cost, so being called away never locks a loss. Only strikes at or above the current price are used. Among strikes that pass, it picks the highest premium. Black-Scholes estimates; check the real bid on your chain. Not financial advice.</p>
+</div>
+</main>
+<script>
+const $=id=>document.getElementById(id),r=0.04;
+function N(x){const t=1/(1+0.2316419*Math.abs(x)),d=0.3989423*Math.exp(-x*x/2),p=d*t*(0.3193815+t*(-0.3565638+t*(1.781478+t*(-1.821256+t*1.330274))));return x>0?1-p:p}
+function call(S,K,iv,days){const t=days/365,s=iv*Math.sqrt(t),d1=(Math.log(S/K)+(r+iv*iv/2)*t)/s;return{c:S*N(d1)-K*Math.exp(-r*t)*N(d1-s),delta:N(d1)}}
+function inc(S){return S<25?1:S<100?2.5:5}
+function strikesFor(S,cost){const i=inc(Math.max(S,cost)),out=[];for(let k=Math.ceil(S/i)*i;k<=Math.max(cost,S)*1.3;k+=i)out.push(+k.toFixed(2));return out}
+function bestAt(S,cost,iv,days,minY){let best=null;for(const k of strikesFor(S,cost)){const o=call(S,k,iv,days),mo=o.c/S*30/days;if(k+o.c>=cost&&mo>=minY&&(!best||o.c>best.c))best={k,c:o.c,mo,delta:o.delta}}return best}
+function run(){
+ const cost=+$('cost').value,S=+$('px').value,iv=+$('iv').value/100,days=+$('dte').value,minY=+$('minY').value/100,green=$('green').checked,a=$('ans');
+ if(!(cost>0&&S>0&&iv>0&&days>0&&minY>=0)){$('err').textContent='Enter positive numbers in every box.';return}
+ $('err').textContent='';
+ const best=bestAt(S,cost,iv,days,minY);
+ let trig=null;if(!best){for(let p=S;p<=cost*1.5;p+=0.25){if(bestAt(p,cost,iv,days,minY)){trig=p;break}}}
+ if(best&&green){a.style.background='var(--okbg)';a.style.color='var(--ok)';a.innerHTML=`<div class="h">SELL TODAY</div><div class="b">$${best.k} call · ~$${best.c.toFixed(2)}</div><div class="s">${(best.mo*100).toFixed(1)}% for the month. If called away you get $${(best.k+best.c).toFixed(2)}/share vs your $${cost.toFixed(2)} cost.</div>`}
+ else if(best){a.style.background='var(--warnbg)';a.style.color='var(--warn)';a.innerHTML=`<div class="h">WAIT FOR A GREEN DAY</div><div class="b">Then sell the $${best.k} call</div><div class="s">Pays ~$${best.c.toFixed(2)} at today's price; more after a green day.</div>`}
+ else{a.style.background='var(--warnbg)';a.style.color='var(--warn)';a.innerHTML=`<div class="h">WAIT</div><div class="b">${trig?'Sell when price ≥ $'+trig.toFixed(2):'No strike pays at this IV'}</div><div class="s">${trig?`That is ${((trig/S-1)*100).toFixed(0)}% above today. Below it, no strike both covers your cost and pays ${(minY*100).toFixed(1)}%/month. Higher IV lowers this price.`:'Try again when IV rises or price recovers.'}</div>`}
+ let h='<tr><th>Strike</th><th>Premium</th><th>/month</th><th>Exit if called</th></tr>',rows=0;
+ for(const k of strikesFor(S,cost)){const o=call(S,k,iv,days),mo=o.c/S*30/days;if(k+o.c<cost)continue;h+=`<tr class="${best&&best.k===k?'pick':''}"><td>$${k}</td><td>$${o.c.toFixed(2)}</td><td>${(mo*100).toFixed(1)}%</td><td>$${(k+o.c).toFixed(2)}</td></tr>`;if(++rows>=6)break}
+ $('tbl').innerHTML=h;
+}
+const keys=['cost','px','iv','dte','minY'];
+function save(){try{const tk=$('tk').value.trim().toUpperCase();if(!tk)return;const o={};keys.forEach(k=>o[k]=$(k).value);localStorage.setItem('ccs:'+tk,JSON.stringify(o));localStorage.setItem('ccs:last',tk)}catch(e){}}
+function load(tk){try{const o=JSON.parse(localStorage.getItem('ccs:'+tk)||'null');if(o)keys.forEach(k=>{if(o[k]!=null)$(k).value=o[k]})}catch(e){}}
+$('tk').addEventListener('change',()=>{const tk=$('tk').value.trim().toUpperCase();$('tk').value=tk;load(tk);$('green').checked=false;run();save()});
+document.querySelectorAll('input:not(#tk)').forEach(i=>i.addEventListener('input',()=>{run();save()}));
+try{const l=localStorage.getItem('ccs:last');if(l){$('tk').value=l;load(l)}}catch(e){}
+run();
+if('serviceWorker' in navigator){navigator.serviceWorker.register('sw.js').catch(()=>{})}
+</script>
+</body>
+</html>
